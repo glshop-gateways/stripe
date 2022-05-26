@@ -16,6 +16,7 @@ use Shop\Cart;
 use Shop\Gateway;
 use Shop\Models\OrderState;
 use Shop\Models\CustomInfo;
+use Shop\Log;
 
 
 // this file can't be used on its own
@@ -60,7 +61,7 @@ class ipn extends \Shop\IPN
         $GW = Gateway::getInstance('stripe');
         $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'];
         $payload = @file_get_contents('php://input');
-        SHOP_log('Recieved Stripe IPN: ' . var_export($payload, true), SHOP_LOG_DEBUG);
+        Log::write('shop_system', Log::DEBUG, 'Received Stripe IPN: ' . var_export($payload, true));
         $event = null;
 
         require_once __DIR__ . '/vendor/autoload.php';
@@ -71,12 +72,12 @@ class ipn extends \Shop\IPN
             );
         } catch(\UnexpectedValueException $e) {
             // Invalid payload
-            SHOP_log("Unexpected Value received from Stripe");
+            Log::write('shop_system', Log::ERROR, "Unexpected Value received from Stripe");
             http_response_code(400); // PHP 5.4 or greater
             exit;
         } catch(\Stripe\Error\SignatureVerification $e) {
             // Invalid signature
-            SHOP_log("Invalid Stripe signature received");
+            Log::write('shop_system', Log::ERROR, "Invalid Stripe signature received");
             http_response_code(400); // PHP 5.4 or greater
             exit;
         }
@@ -136,7 +137,7 @@ class ipn extends \Shop\IPN
 
         if (!$trans || $trans->status != 'succeeded') {
             // Payment verification failed.
-            SHOP_log('ipn\stripe::Verify() failed', SHOP_LOG_DEBUG);
+            Log::write('shop_system', Log::DEBUG, 'ipn\stripe::Verify() failed');
             return false;
         }
         $this->ipn_data['txn'] = $trans;
@@ -168,7 +169,7 @@ class ipn extends \Shop\IPN
         $this->ipn_data['pmt_tax'] = $this->getPmtTax();
         $this->ipn_data['pmt_gross'] = $this->getPmtGross();
         $this->ipn_data['status'] = $this->getStatus();  // to get into handlePurchase()
-        SHOP_log("Stripe transaction verified OK", SHOP_LOG_DEBUG);
+        Log::write('shop_system', Log::DEBUG, "Stripe transaction verified OK");
         return true;
     }
 
@@ -209,7 +210,7 @@ class ipn extends \Shop\IPN
             );
             return false;
         } elseif (!$this->isUniqueTxnId()) {
-            SHOP_log("Duplicate Txn ID " . $this->getTxnId());
+            Log::write('shop_system', Log::ERROR, "Duplicate Txn ID " . $this->getTxnId());
             $logId = $this->Log(false);
             return false;
         } else {
@@ -218,7 +219,7 @@ class ipn extends \Shop\IPN
 
         // If no data has been received, then there's nothing to do.
         if (empty($this->_payment)) {
-            SHOP_log("Empty payment received");
+            Log::write('shop_system', Log::ERROR, "Empty payment received");
             return false;
         }
         return $this->handlePurchase();

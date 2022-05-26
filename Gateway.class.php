@@ -18,6 +18,7 @@ use Shop\Coupon;
 use Shop\Currency;
 use Shop\Customer;
 use Shop\Models\OrderState;
+use Shop\Log;
 
 
 /**
@@ -420,7 +421,7 @@ class Gateway extends \Shop\Gateway
         if ($gwCustomer) {
             $cust_id = $gwCustomer->id;
         } else {
-            SHOP_log("Error creating Stripe customer for order {$Order->getOrderId()}");
+            Log::write('shop_system', Log::ERROR, "Error creating Stripe customer for order {$Order->getOrderId()}");
             return false;
         }
 
