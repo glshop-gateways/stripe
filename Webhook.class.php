@@ -175,13 +175,13 @@ class Webhook extends \Shop\Webhook
             $amt_paid = $Payment->amount_paid;
             if ($amt_paid > 0) {
                 $this->setID($this->getData()->id);
-                var_dumP($this);die;
+                $LogID = $this->logIPN();
                 $currency = $Payment->currency;
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
                 $Pmt = Payment::getByReference($this->getID());
                 if ($Pmt->getPmtID() == 0) {
                     $Pmt->setRefID($Payment->payment_intent)
-                        ->setTxnID($this->getID())
+                        ->setTxnId($LogID)
                         ->setAmount($this_pmt)
                         ->setGateway($this->getSource())
                         ->setMethod($this->GW->getDscp())
@@ -191,7 +191,6 @@ class Webhook extends \Shop\Webhook
                         ->setOrderID($this->getOrderID());
                     $retval = $Pmt->Save();
                 }
-                $this->logIPN();
             }
             break;
         case 'checkout.session.completed':
@@ -222,12 +221,14 @@ class Webhook extends \Shop\Webhook
             if ($amt_paid > 0) {
                 $this->setID($this->getData()->id);
                 $currency = $Payment->currency;
+                $this->setRefID($Payment->payment_intent);
+                $LogID = $this->logIPN();
 
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
                 $this->Payment = Payment::getByReference($this->getID());
                 if ($this->Payment->getPmtID() == 0) { 
                     $this->Payment->setRefID($Payment->payment_intent)
-                        ->setTxnId($this->getID())
+                        ->setTxnId($LogID)
                         ->setAmount($this_pmt)
                         ->setGateway($this->getSource())
                         ->setMethod($this->GW->getDscp())
@@ -239,7 +240,6 @@ class Webhook extends \Shop\Webhook
                     $retval = true;
                 }
                 $retval = $this->handlePurchase($this->Order);
-                $this->logIPN();
             }
             break;
         default:
