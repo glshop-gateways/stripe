@@ -181,7 +181,6 @@ class Webhook extends \Shop\Webhook
                 $Pmt = Payment::getByReference($this->getID());
                 if ($Pmt->getPmtID() == 0) {
                     $Pmt->setRefID($Payment->payment_intent)
-                        ->setTxnId($LogID)
                         ->setAmount($this_pmt)
                         ->setGateway($this->getSource())
                         ->setMethod($this->GW->getDscp())
@@ -228,7 +227,6 @@ class Webhook extends \Shop\Webhook
                 $this->Payment = Payment::getByReference($this->getID());
                 if ($this->Payment->getPmtID() == 0) { 
                     $this->Payment->setRefID($Payment->payment_intent)
-                        ->setTxnId($LogID)
                         ->setAmount($this_pmt)
                         ->setGateway($this->getSource())
                         ->setMethod($this->GW->getDscp())
