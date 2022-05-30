@@ -1,3 +1,7 @@
 {
-    "name": "stripe"
+    "name": "stripe",
+	"repo": {
+		"type": "github",
+		"project_id": "stripe"
+	}
 }
