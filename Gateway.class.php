@@ -26,6 +26,10 @@ use Shop\Log;
  */
 class Gateway extends \Shop\Gateway
 {
+    /** Gateway version.
+     * @var string */
+    protected $VERSION = '1.4.0';
+
     /** Gateway ID.
      * @var string */
     protected $gw_name = 'stripe';
@@ -38,29 +42,25 @@ class Gateway extends \Shop\Gateway
      * @var string */
     protected $gw_desc = 'Stripe Payment Gateway';
 
-    /** Flag this gateway as bundled with the Shop plugin.
-     * @var integer */
-    protected $bundled = 1;
-
     /** Active public API Key.
      * @var string */
-    private $pub_key;
+    private $pub_key = '';
 
     /** Active secret key.
      * @var string */
-    private $sec_key;
+    private $sec_key = '';
 
     /** Active webhook secret.
      * @var string */
-    private $hook_sec;
+    private $hook_sec = '';
 
     /** Checkout session.
      * @var object */
-    private $session;
+    private $session = NULL;
 
     /** Cart object. Set in gatewayVars and used in getCheckoutButton().
      * @var object */
-    private $_cart;
+    private $_cart = NULL;
 
 
     /**
