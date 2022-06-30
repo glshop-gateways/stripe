@@ -228,7 +228,7 @@ class Gateway extends \Shop\Gateway
             'mode' => 'payment',
             'payment_method_types' => ['card'],
             'line_items' => $line_items,
-            'success_url' => Config::get('url') . '/index.php',
+            'success_url' => Config::get('url') . '/index.php?thanks=stripe',
             'cancel_url' => $cart->cancelUrl(),
             'client_reference_id' => $cartID,
             'metadata' => array(

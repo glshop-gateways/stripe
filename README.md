@@ -7,7 +7,7 @@ If you use Bad Behavior, be sure to whitelist your webhook url (`your_site/shop/
 Set up an account at https://www.stripe.com. In addition, there are several items in your Stripe account that must be set up correctly in order to process purchases.
 
   - Create API keys in both Test and Live environments. You'll enter these keys in the gateway configuration.
-  - Create a webhook pointing to the IPN handler, e.g. `https://example.com/shop/hooks/webhook.php?_gw=stripe`
+  - Create a webhook pointing to the webhook handler, e.g. `https://example.com/shop/hooks/webhook.php?_gw=stripe`
   - Get the webhook signatures (Test and Live) from Stripe and add them to the gateway configuration.
 
 ## Webhook Setup
