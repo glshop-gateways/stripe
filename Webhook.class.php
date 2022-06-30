@@ -19,6 +19,7 @@ use Shop\Payment;
 use Shop\Models\OrderState;
 use Shop\Models\CustomInfo;
 use Shop\Log;
+use Shop\Config;
 
 
 // this file can't be used on its own
@@ -72,6 +73,14 @@ class Webhook extends \Shop\Webhook
             $payload = '';
             $sig_header = 'invalid';
         }
+        if (Config::get('sys_test_ipn')) {
+            $this->setData($event);
+            $this->setEvent($this->getData()->type);
+            $this->setVerified(true);
+            $this->blob = $payload;
+            return true;
+        }
+
         Log::write('shop_system', Log::DEBUG, 'Received Stripe Webhook: ' . var_export($payload, true));
         Log::write('shop_system', Log::DEBUG, 'Sig Key: ' . var_export($sig_header, true));
 
@@ -238,6 +247,47 @@ class Webhook extends \Shop\Webhook
                     $retval = true;
                 }
                 $retval = $this->handlePurchase($this->Order);
+            }
+            break;
+        case 'charge.refunded':
+            //var_dump($this->getData());die;
+            $object = $this->getData()->data->object;
+            if (isset($object->payment_intent)) {
+                $pmt_intent = $object->payment_intent;
+            } else {
+                $pmt_intent = '';
+            }
+            if (empty($pmt_intent)) {
+                return false;
+            }
+
+            $refund_amt = $object->amount_refunded / 100;
+            $this->setPayment($refund_amt * -1);
+            $this->setID($object->id);
+            $this->setRefId($pmt_intent);
+            $this->setPmtMethod('refund');
+            $this->setComplete($object->status == 'succeeded');
+
+            $origPmt = Payment::getByReference($pmt_intent);
+            if ($origPmt->getPmtId() > 0) {
+                $order_id = $origPmt->getOrderId();
+                if (!empty($order_id)) {
+                    $Order = Order::getInstance($order_id);
+                    if ($Order->isNew()) {
+                        $Order = NULL;
+                    }
+                }
+            }
+            $this->setOrderID($Order->getOrderID());
+            if ($Order) {
+                $total = $Order->getTotal();
+                if ($refund_amt >= $total) {
+                    $this->handleFullRefund($Order);
+                }
+                $this->recordPayment();
+                $retval = true;
+            } else {
+                $this->logIPN();
             }
             break;
         default:
