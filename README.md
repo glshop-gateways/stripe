@@ -23,6 +23,8 @@ Set up an account at https://www.stripe.com. In addition, there are several item
     - `payment_intent.canceled`
     - `payment_intent.succeeded`
     - `checkout.session.completed`
+    - `charge.refunded`
+    - `charge.refund_updated`
     - To enable invoicing (see terms), also select these items:
       - `invoice.payment_failed`
       - `invoice.finalized`
