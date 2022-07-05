@@ -16,7 +16,7 @@ use Shop\Order;
 use Shop\Gateway;
 use Shop\Currency;
 use Shop\Payment;
-use Shop\Models\OrderState;
+use Shop\Models\OrderStatus;
 use Shop\Models\CustomInfo;
 use Shop\Log;
 use Shop\Config;
@@ -73,6 +73,9 @@ class Webhook extends \Shop\Webhook
             $payload = '';
             $sig_header = 'invalid';
         }
+
+        Log::write('shop_system', Log::DEBUG, 'Received Stripe Webhook: ' . var_export($payload, true));
+        Log::write('shop_system', Log::DEBUG, 'Sig Key: ' . var_export($sig_header, true));
         if (Config::get('sys_test_ipn')) {
             $this->setData($event);
             $this->setEvent($this->getData()->type);
@@ -80,9 +83,6 @@ class Webhook extends \Shop\Webhook
             $this->blob = $payload;
             return true;
         }
-
-        Log::write('shop_system', Log::DEBUG, 'Received Stripe Webhook: ' . var_export($payload, true));
-        Log::write('shop_system', Log::DEBUG, 'Sig Key: ' . var_export($sig_header, true));
 
         if ($sig_header == 'invalid') {
             return false;
@@ -150,7 +150,7 @@ class Webhook extends \Shop\Webhook
             $this->Order->setGatewayRef($this->getData()->data->object->id)
                         ->setInfo('terms_gw', $this->GW->getName())
                         ->Save();
-            if ($this->Order->statusAtLeast(OrderState::PROCESSING)) {
+            if (OrderStatus::checkOrderValid($this->Order->getStatus())) {
                 Log::write('shop_system', Log::ERROR, "Order " . $this->Order->getOrderId() . " was already invoiced and processed");
             }
 
@@ -202,28 +202,29 @@ class Webhook extends \Shop\Webhook
             }
             break;
         case 'checkout.session.completed':
+        //case 'payment_intent.succeeded':
             // Immediate checkout notification
             if (!isset($this->getData()->data->object->client_reference_id)) {
                 Log::write('shop_system', Log::ERROR, "Order ID not found in invoice metadata");
-                return false;
+                return true;
             }
             if (!isset($this->getData()->data->object->payment_intent)) {
                 Log::write('shop_system', Log::ERROR, "Payment Intent value not include in webhook");
-                return false;
+                return true;
             }
 
             $Payment = $this->getData()->data->object;
             $this->setID($Payment->payment_intent);
             if (!$this->isUniqueTxnId()) {
                 Log::write('shop_system', Log::ERROR, "Duplicate Stripe Webhook received: " . $this->getData()->id);
-                return false;
+                return true;
             }
 
             $this->setOrderID($this->getData()->data->object->client_reference_id);
             $this->Order = Order::getInstance($this->getOrderID());
             if ($this->Order->isNew()) {
                 Log::write('shop_system', Log::ERROR, "Invalid Order ID received in webhook");
-                return false;
+                return true;
             }
             $amt_paid = $Payment->amount_total;
             if ($amt_paid > 0) {
@@ -250,7 +251,6 @@ class Webhook extends \Shop\Webhook
             }
             break;
         case 'charge.refunded':
-            //var_dump($this->getData());die;
             $object = $this->getData()->data->object;
             if (isset($object->payment_intent)) {
                 $pmt_intent = $object->payment_intent;

@@ -17,7 +17,7 @@ use Shop\Cart;
 use Shop\Coupon;
 use Shop\Currency;
 use Shop\Customer;
-use Shop\Models\OrderState;
+use Shop\Models\OrderStatus;
 use Shop\Log;
 
 
@@ -480,7 +480,7 @@ class Gateway extends \Shop\Gateway
             $Order->setGatewayRef($invObj->id)
                   ->setInfo('terms_gw', $this->getConfig('gateway'))
                   ->Save();
-            $Order->updateStatus(OrderState::INVOICED);
+            $Order->updateStatus(OrderStatus::INVOICED);
         }
         $invObj->finalizeInvoice();
         return $invObj;

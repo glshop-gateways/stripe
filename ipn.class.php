@@ -14,7 +14,7 @@
 namespace Shop\Gateways\stripe;
 use Shop\Cart;
 use Shop\Gateway;
-use Shop\Models\OrderState;
+use Shop\Models\OrderStatus;
 use Shop\Models\CustomInfo;
 use Shop\Log;
 
@@ -111,7 +111,7 @@ class ipn extends \Shop\IPN
             ->setEmail($this->Order->getBuyerEmail())
             ->setPayerName($_USER['fullname'])
             ->setGwName($this->GW->getName())
-            ->setStatus(OrderState::PENDING);
+            ->setStatus(OrderStatus::PENDING);
 
         $this->shipto = $shipto->toArray();
         $this->custom = new CustomInfo(array(
@@ -144,7 +144,7 @@ class ipn extends \Shop\IPN
 
         // Verification succeeded, get payment info.
         $this
-            ->setStatus(OrderState::PAID)
+            ->setStatus(OrderStatus::PAID)
             ->setCurrency($trans->currency)
             ->setPmtGross($this->getCurrency()->fromInt($trans->amount_received));
 
