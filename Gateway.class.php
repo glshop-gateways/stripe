@@ -26,10 +26,6 @@ use Shop\Log;
  */
 class Gateway extends \Shop\Gateway
 {
-    /** Gateway version.
-     * @var string */
-    protected $VERSION = '1.4.0';
-
     /** Gateway ID.
      * @var string */
     protected $gw_name = 'stripe';

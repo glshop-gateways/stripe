@@ -1,7 +1,8 @@
 {
-	"name": "stripe",
-	"repo": {
-		"type": "github",
-		"project_id": "stripe"
-	}
+  "name": "stripe",
+  "version": "1.4.0",
+  "repo": {
+    "type": "github",
+    "project_id": "stripe"
+  }
 }
