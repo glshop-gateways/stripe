@@ -65,7 +65,6 @@ class Webhook extends \Shop\Webhook
         if (isset($_POST['vars'])) {
             $payload = base64_decode($_POST['vars']);
             $sig_header = $_POST['HTTP_STRIPE_SIGNATURE'];
-            $event = json_decode($payload);
         } elseif (isset($_SERVER['HTTP_STRIPE_SIGNATURE'])) {
             $payload = @file_get_contents('php://input');
             $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'];
@@ -76,11 +75,14 @@ class Webhook extends \Shop\Webhook
 
         Log::write('shop_system', Log::DEBUG, 'Received Stripe Webhook: ' . var_export($payload, true));
         Log::write('shop_system', Log::DEBUG, 'Sig Key: ' . var_export($sig_header, true));
+        $this->blob = $payload;
+
         if (Config::get('sys_test_ipn')) {
+            $event = json_decode($payload);
             $this->setData($event);
             $this->setEvent($this->getData()->type);
             $this->setVerified(true);
-            $this->blob = $payload;
+            $this->setID($this->getData()->id);
             return true;
         }
 
@@ -88,7 +90,6 @@ class Webhook extends \Shop\Webhook
             return false;
         }
 
-        $this->blob = $payload;
 
         if ($event === NULL) {  // to skip test data from $_POST
             require_once __DIR__ . '/vendor/autoload.php';
@@ -117,6 +118,7 @@ class Webhook extends \Shop\Webhook
         }
         $this->setData($event);
         $this->setEvent($this->getData()->type);
+        $this->setID($this->getData()->id);
         $this->setVerified(true);
         Log::write('shop_system', Log::DEBUG, "Stripe webhook verified OK");
         return true;
@@ -170,10 +172,8 @@ class Webhook extends \Shop\Webhook
                 return false;
             }
             $Payment = $this->getData()->data->object;
-            $this->setID($Payment->payment_intent);
             if (!$this->isUniqueTxnId()) {
-                Log::write('shop_system', Log::ERROR, "Duplicate Stripe Webhook received: " . $this->getData()->id);
-                return false;
+                return true;
             }
 
             $this->setOrderID($this->getData()->data->object->metadata->order_id);
@@ -184,7 +184,6 @@ class Webhook extends \Shop\Webhook
             }
             $amt_paid = $Payment->amount_paid;
             if ($amt_paid > 0) {
-                $this->setID($this->getData()->id);
                 $this->setRefID($Payment->payment_intent);
                 $LogID = $this->logIPN();
                 $currency = $Payment->currency;
@@ -216,9 +215,7 @@ class Webhook extends \Shop\Webhook
             }
 
             $Payment = $this->getData()->data->object;
-            $this->setID($Payment->payment_intent);
             if (!$this->isUniqueTxnId()) {
-                Log::write('shop_system', Log::ERROR, "Duplicate Stripe Webhook received: " . $this->getData()->id);
                 return true;
             }
 
@@ -230,7 +227,6 @@ class Webhook extends \Shop\Webhook
             }
             $amt_paid = $Payment->amount_total;
             if ($amt_paid > 0) {
-                $this->setID($this->getData()->id);
                 $currency = $Payment->currency;
                 $this->setRefID($Payment->payment_intent);
                 $LogID = $this->logIPN();
@@ -265,7 +261,6 @@ class Webhook extends \Shop\Webhook
 
             $refund_amt = $object->amount_refunded / 100;
             $this->setPayment($refund_amt * -1);
-            $this->setID($object->id);
             $this->setRefId($pmt_intent);
             $this->setPmtMethod('refund');
             $this->setComplete($object->status == 'succeeded');
