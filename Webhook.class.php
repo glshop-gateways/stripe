@@ -158,6 +158,7 @@ class Webhook extends \Shop\Webhook
             $retval = $this->handlePurchase($this->Order);
             break;
         case 'invoice.payment_succeeded': 
+        case 'invoice.paid':
             // Invoice payment notification
             if (!isset($this->getData()->data->object->metadata->order_id)) {
                 Log::write('shop_system', Log::ERROR, "Order ID not found in invoice metadata");
@@ -184,6 +185,7 @@ class Webhook extends \Shop\Webhook
             $amt_paid = $Payment->amount_paid;
             if ($amt_paid > 0) {
                 $this->setID($this->getData()->id);
+                $this->setRefID($Payment->payment_intent);
                 $LogID = $this->logIPN();
                 $currency = $Payment->currency;
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
