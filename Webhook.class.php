@@ -16,6 +16,7 @@ use Shop\Order;
 use Shop\Gateway;
 use Shop\Currency;
 use Shop\Payment;
+use Shop\Address;
 use Shop\Models\OrderStatus;
 use Shop\Models\CustomInfo;
 use Shop\Log;
@@ -73,11 +74,17 @@ class Webhook extends \Shop\Webhook
             $sig_header = 'invalid';
         }
 
+        Log::write('shop_system', Log::INFO, 'Received Stripe Webhook');
         Log::write('shop_system', Log::DEBUG, 'Received Stripe Webhook: ' . var_export($payload, true));
         Log::write('shop_system', Log::DEBUG, 'Sig Key: ' . var_export($sig_header, true));
         $this->blob = $payload;
 
-        if (Config::get('sys_test_ipn')) {
+        if ($sig_header == 'invalid') {
+            return false;
+        }
+
+        // If testing, just pretend it's valid
+        if (Config::get('sys_test_ipn') && isset($_GET['testhook'])) {
             $event = json_decode($payload);
             $this->setData($event);
             $this->setEvent($this->getData()->type);
@@ -85,11 +92,6 @@ class Webhook extends \Shop\Webhook
             $this->setID($this->getData()->id);
             return true;
         }
-
-        if ($sig_header == 'invalid') {
-            return false;
-        }
-
 
         if ($event === NULL) {  // to skip test data from $_POST
             require_once __DIR__ . '/vendor/autoload.php';
@@ -110,17 +112,21 @@ class Webhook extends \Shop\Webhook
                 return false;
                 //http_response_code(400); // PHP 5.4 or greater
                 //exit;
+            } catch (\Exception $e) {
+                Log::write('shop_system', Log::ERROR, __METHOD__ . ': ' . $e->getMessage());
+                return false;
             }
         }
+        Log::write('shop_system', Log::DEBUG, __METHOD__ . ':' . var_export($event,true));
         if (empty($event)) {
-            Log::write('shop_system', Log::ERROR, "Unable to create Stripe webhook event");
+            Log::write('shop_system', Log::ERROR, __METHOD__ . ': Unable to create Stripe webhook event');
             return false;
         }
         $this->setData($event);
         $this->setEvent($this->getData()->type);
         $this->setID($this->getData()->id);
         $this->setVerified(true);
-        Log::write('shop_system', Log::DEBUG, "Stripe webhook verified OK");
+        Log::write('shop_system', Log::INFO, "Stripe webhook verified OK");
         return true;
     }
 
@@ -137,6 +143,7 @@ class Webhook extends \Shop\Webhook
 
         switch ($this->getEvent()) {
         case 'invoice.created':
+        case 'invoice.finalized':
             // Invoice was created. As a net-terms customer, the order
             // can be processed.
             if (!isset($this->getData()->data->object->metadata->order_id)) {
@@ -155,11 +162,12 @@ class Webhook extends \Shop\Webhook
             if (OrderStatus::checkOrderValid($this->Order->getStatus())) {
                 Log::write('shop_system', Log::ERROR, "Order " . $this->Order->getOrderId() . " was already invoiced and processed");
             }
+            $this->logIPN();
 
             // Invoice created successfully
             $retval = $this->handlePurchase($this->Order);
             break;
-        case 'invoice.payment_succeeded': 
+        case 'invoice.payment_succeeded':
         case 'invoice.paid':
             // Invoice payment notification
             if (!isset($this->getData()->data->object->metadata->order_id)) {
@@ -188,7 +196,7 @@ class Webhook extends \Shop\Webhook
                 $LogID = $this->logIPN();
                 $currency = $Payment->currency;
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
-                $Pmt = Payment::getByReference($this->getID());
+                $Pmt = Payment::getByReference($this->getRefID());
                 if ($Pmt->getPmtID() == 0) {
                     $Pmt->setRefID($Payment->payment_intent)
                         ->setAmount($this_pmt)
@@ -203,7 +211,6 @@ class Webhook extends \Shop\Webhook
             }
             break;
         case 'checkout.session.completed':
-        //case 'payment_intent.succeeded':
             // Immediate checkout notification
             if (!isset($this->getData()->data->object->client_reference_id)) {
                 Log::write('shop_system', Log::ERROR, "Order ID not found in invoice metadata");
@@ -226,6 +233,30 @@ class Webhook extends \Shop\Webhook
                 return true;
             }
             $amt_paid = $Payment->amount_total;
+
+            // Set the billing and shipping address to at least get the name,
+            // if not already set.
+            if (isset($Payment->customer_details)) {
+                $arr = $Payment->customer_details;
+                $Address = new Address;
+                $Address->fromArray(array(
+                    'id' => -1,
+                    'name' => $arr->name,
+                    'phone' => $arr->phone,
+                    'address1' => $arr->address->line1,
+                    'address2' => $arr->address->line2,
+                    'city' => $arr->address->city,
+                    'state' => $arr->address->state,
+                    'zip' => $arr->address->postal_code,
+                ) );
+                if ($this->Order->getBillto()->getID() == 0) {
+                    $this->Order->setBillto($Address);
+                }
+                if ($this->Order->getShipto()->getID() == 0) {
+                    $this->Order->setBillto($Address);
+                }
+            }
+
             if ($amt_paid > 0) {
                 $currency = $Payment->currency;
                 $this->setRefID($Payment->payment_intent);
@@ -233,7 +264,7 @@ class Webhook extends \Shop\Webhook
 
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
                 $this->Payment = Payment::getByReference($this->getID());
-                if ($this->Payment->getPmtID() == 0) { 
+                if ($this->Payment->getPmtID() == 0) {
                     $this->Payment->setRefID($Payment->payment_intent)
                         ->setAmount($this_pmt)
                         ->setGateway($this->getSource())
@@ -287,6 +318,20 @@ class Webhook extends \Shop\Webhook
                 $this->logIPN();
             }
             break;
+
+        case 'payment_intent.created':
+        case 'payment_intent.succeeded':
+            // Just logging the notification, not updating the payments table
+            if (isset($this->getData()->data->object->id)) {
+                $Obj = $this->getData()->data->object;
+                var_dump($Obj);die;
+                $this->setRefID($Obj->id);
+                $this->setEvent($this->getEvent());
+                $this->logIPN();
+                $retval = true;
+            }
+            break;
+
         default:
             Log::write('shop_system', Log::ERROR, "Unhandled Stripe event {$this->getData()->type} received");
             $retval = true;     // OK, just some other event received
