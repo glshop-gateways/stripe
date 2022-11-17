@@ -3,9 +3,9 @@
  * Stripe payment gateway class.
  *
  * @author      Lee Garner <lee@leegarner.com>
- * @copyright   Copyright (c) 2019 Lee Garner <lee@leegarner.com>
+ * @copyright   Copyright (c) 2019-2022 Lee Garner <lee@leegarner.com>
  * @package     shop
- * @version     v1.0.0
+ * @version     v1.4.1
  * @since       v0.7.1
  * @license     http://opensource.org/licenses/gpl-2.0.php
  *              GNU Public License v2 or later
@@ -17,6 +17,8 @@ use Shop\Cart;
 use Shop\Coupon;
 use Shop\Currency;
 use Shop\Customer;
+use Shop\Order;
+use Shop\Gateway as BaseGW;
 use Shop\Models\OrderStatus;
 use Shop\Log;
 
@@ -239,7 +241,11 @@ class Gateway extends \Shop\Gateway
         }
 
         // Create the checkout session and load the Stripe javascript
-        $this->session = $apiClient->checkout->sessions->create($session_params);
+        try {
+            $this->session = $apiClient->checkout->sessions->create($session_params);
+        } catch (\Exception $e) {
+            Log::write('shop_system', Log::ERROR, __METHOD__ . ': ' . $e->getMessage());
+        }
         if (!$have_js) {
             $outputHandle = \outputHandler::getInstance();
             $outputHandle->addLinkScript('https://js.stripe.com/v3/');
@@ -342,14 +348,18 @@ class Gateway extends \Shop\Gateway
      * @param   integer $uid    Customer user ID
      * @return  object      Stripe customer record
      */
-    public function getCustomer($uid)
+    public function getCustomer(int $uid) : ?object
     {
         $cust_info = NULL;
         $Customer = Customer::getInstance($uid);
         $gw_id = $Customer->getGatewayId($this->gw_name);
         if ($gw_id) {
-            $client = $this->getApiClient();
-            $cust_info = $client->customers->retrieve($gw_id);
+            try {
+                $client = $this->getApiClient();
+                $cust_info = $client->customers->retrieve($gw_id);
+            } catch (\Exception $e) {
+                // Likely customer not found thrown. Leave $cust_info as NULL.
+            }
         }
         if (
             !is_object($cust_info) ||
@@ -369,7 +379,7 @@ class Gateway extends \Shop\Gateway
      * @param   object  $Order      Order object, to get customer info
      * @return  object|false    Customer object, or false if an error occurs
      */
-    private function createCustomer($Customer)
+    private function createCustomer($Customer) : ?object
     {
         // Get the default billing address to user in the Stripe record.
         // If there is no name entered for the default address, use the
@@ -394,9 +404,14 @@ class Gateway extends \Shop\Gateway
         ];
 
         $client = $this->getApiClient();
-        $apiResponse = $client->customers->create($params);
-        if (isset($apiResponse->id)) {
-            $Customer->setGatewayId($this->gw_name, $apiResponse->id);
+        try {
+            $apiResponse = $client->customers->create($params);
+            if (isset($apiResponse->id)) {
+                $Customer->setGatewayId($this->gw_name, $apiResponse->id);
+            }
+        } catch (\Exception $e) {
+            Log:;write('shop_system', Log::ERROR, __METHOD__ . ': ' . $e->getMessage());
+            $apiResponse = NULL;
         }
         return $apiResponse;
     }
@@ -409,7 +424,7 @@ class Gateway extends \Shop\Gateway
      * @param   object  $terms_gw   Invoice terms gateway, for config values
      * @return  boolean     True on success, False on error
      */
-    public function createInvoice($Order, $terms_gw)
+    public function createInvoice(Order $Order, BaseGW $terms_gw) : bool
     {
         global $LANG_SHOP;
 
@@ -475,11 +490,12 @@ class Gateway extends \Shop\Gateway
         if (isset($invObj->status) && $invObj->status == 'draft') {
             $Order->setGatewayRef($invObj->id)
                   ->setInfo('terms_gw', $this->getConfig('gateway'))
+                  ->createInvoice()
                   ->Save();
             $Order->updateStatus(OrderStatus::INVOICED);
         }
         $invObj->finalizeInvoice();
-        return $invObj;
+        return true;
     }
 
 
