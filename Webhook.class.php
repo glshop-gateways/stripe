@@ -60,7 +60,7 @@ class Webhook extends \Shop\Webhook
      *
      * @return  boolean         true if successfully validated, false otherwise
      */
-    public function Verify()
+    public function Verify() : bool
     {
         $event = NULL;
         if (isset($_POST['vars'])) {
@@ -137,7 +137,7 @@ class Webhook extends \Shop\Webhook
      *
      * @return  boolean     True on success, False on error
      */
-    public function Dispatch()
+    public function Dispatch() : bool
     {
         $retval = false;        // be pessimistic
 
@@ -160,6 +160,7 @@ class Webhook extends \Shop\Webhook
                         ->setInfo('terms_gw', $this->GW->getName())
                         ->Save();
             if (OrderStatus::checkOrderValid($this->Order->getStatus())) {
+                $this->setStatusMsg("Duplicate message for order " . $this->Order->getOrderId());
                 Log::write('shop_system', Log::ERROR, "Order " . $this->Order->getOrderId() . " was already invoiced and processed");
             }
             $this->logIPN();
@@ -181,6 +182,7 @@ class Webhook extends \Shop\Webhook
             }
             $Payment = $this->getData()->data->object;
             if (!$this->isUniqueTxnId()) {
+                // Duplicate transaction, not an error.
                 return true;
             }
 
@@ -223,6 +225,7 @@ class Webhook extends \Shop\Webhook
 
             $Payment = $this->getData()->data->object;
             if (!$this->isUniqueTxnId()) {
+                $this->setStatusMsg('Duplicate payment message');
                 return true;
             }
 
@@ -287,6 +290,7 @@ class Webhook extends \Shop\Webhook
                 $pmt_intent = '';
             }
             if (empty($pmt_intent)) {
+                Log::write('shop_system', Log::DEBUG, 'No payment intent included in webhook');
                 return false;
             }
 
@@ -324,7 +328,6 @@ class Webhook extends \Shop\Webhook
             // Just logging the notification, not updating the payments table
             if (isset($this->getData()->data->object->id)) {
                 $Obj = $this->getData()->data->object;
-                var_dump($Obj);die;
                 $this->setRefID($Obj->id);
                 $this->setEvent($this->getEvent());
                 $this->logIPN();

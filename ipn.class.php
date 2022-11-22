@@ -129,7 +129,7 @@ class ipn extends \Shop\IPN
      *
      * @return  boolean         true if successfully validated, false otherwise
      */
-    public function Verify()
+    public function Verify() : bool
     {
         // Get the payment intent from Stripe
         $trans = $this->GW->getPayment($this->getTxnId());
