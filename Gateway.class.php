@@ -21,6 +21,7 @@ use Shop\Order;
 use Shop\Gateway as BaseGW;
 use Shop\Models\OrderStatus;
 use Shop\Models\CustomerGateway;
+use Shop\Models\Token;
 use Shop\Log;
 
 
@@ -134,24 +135,41 @@ class Gateway extends \Shop\Gateway
 
 
     /**
-     *  Get the form variables for this checkout button.
-     *  For Stripe there are several things to do, but there are no form vars.
+     * Get the form vars to add to the "confirm" button.
      *
-     *  @param  object  $cart   Shopping cart
-     *  @return string          HTML for input vars
+     * @param   object  $Cart       Order object
+     * @return  string      HTML input vars
      */
-    public function gatewayVars(Order $cart) : string
+    public function gatewayVars(Order $Cart) : string
+    {
+        $vars = array(
+            'order_id' => $Cart->getOrderID(),
+            'secret' => Token::encrypt($Cart->getSecret()),
+        );
+        $gw_vars = '';
+        foreach ($vars as $name=>$val) {
+            $gw_vars .= '<input type="hidden" name="' . $name .
+                '" value="' . $val . '" />' . "\n";
+        }
+        return $gw_vars;
+    }
+
+
+    /**
+     * Creates the order object via Stripe API.
+     *
+     * @param   object  $cart   Shopping cart
+     * @return  object      Stripe checkout session object
+     */
+    public function _createOrder(Order $cart) : ?object
     {
         global $LANG_SHOP;
-
-        static $have_js = false;
 
         if (!$this->Supports('checkout')) {
             return '';
         }
 
         $apiClient = $this->getApiClient();
-        $this->_cart = $cart;   // Save to it is available to getCheckoutButton()
         $cartID = $cart->getOrderID();
         $shipping = 0;
         $Cur = \Shop\Currency::getInstance();
@@ -245,34 +263,21 @@ class Gateway extends \Shop\Gateway
             $this->session = $apiClient->checkout->sessions->create($session_params);
         } catch (\Exception $e) {
             Log::error(__METHOD__ . ': ' . $e->getMessage());
+            $this->session = NULL;
         }
-        if (!$have_js) {
-            $outputHandle = \outputHandler::getInstance();
-            $outputHandle->addLinkScript('https://js.stripe.com/v3/');
-            $have_js = true;
-        }
-
-        // No actual form vars needed
-        return '';
+        return $this->session;
     }
 
 
     /**
-     * Get additional javascript to be attached to the checkout button.
-     * Stripe redirect is done completely in JS, and there is no cancel option.
+     * No javascript needed since we redirect through confirm.php.
      *
      * @param   object  $cart   Shopping cart object
      * @return  string  Javascript commands.
      */
     public function getCheckoutJS(Order $cart) : string
     {
-        $js = array(
-            'finalizeCart("' . $cart->getOrderID() . '","' . $cart->getUID() . '", ' . $this->do_redirect . ');',
-            'var stripe = Stripe("' . $this->pub_key . '");',
-            "stripe.redirectToCheckout({sessionId: \"{$this->session->id}\"});",
-            "return false;",
-        );
-        return implode(" ", $js);
+        return '';
     }
 
 
@@ -349,7 +354,7 @@ class Gateway extends \Shop\Gateway
      * @param   object  $Cart   Shopping cart object
      * @return  object      Stripe customer record
      */
-    public function getCustomer(Cart $Cart) : ?object
+    public function getCustomer(Order $Cart) : ?object
     {
         $cust_info = NULL;
         $email = $Cart->getBuyerEmail();
@@ -548,6 +553,69 @@ class Gateway extends \Shop\Gateway
         return !empty($this->getConfig('pub_key')) &&
             !empty($this->getConfig('sec_key')) &&
             !empty($this->getConfig('hook_sec'));
+    }
+
+
+    /**
+     * Confirm the order and redirect to the payment page
+     *
+     * @param   object  $Order  Shop Order object
+     * @return  string      Redirect URL
+     */
+    public function confirmOrder(Order $Order) : string
+    {
+        global $LANG_SHOP;
+
+        $redirect = '';
+        if (!$Order->isNew()) {
+            $gwOrder = $this->_createOrder($Order);
+            Log::debug("order created: " . print_r($gwOrder,true));
+            if (is_object($gwOrder)) {
+                $Order->setGatewayRef($gwOrder->id)->Save();
+                $redirect = $gwOrder->url;
+            } else {
+                COM_setMsg("There was an error processing your order");
+            }
+        }
+        return $redirect;
+    }
+
+
+    /**
+     * Get the form action URL.
+     *
+     * @return  string      URL to payment processor
+     */
+    public function getActionUrl() : string
+    {
+        return Config::get('url') . '/confirm.php';
+    }
+
+
+    /**
+     * List all available checkout sessions.
+     * Used for debugging only.
+     *
+     * @return  object      Session info from Stripe
+     */
+    public function listCheckoutSessions()
+    {
+        return $this->getApiClient()->checkout->sessions->all();
+    }
+
+
+    /**
+     * Expire the checkout session if the customer cancels payment.
+     *
+     * @param   object  $Cart   Order object
+     */
+    public function cancelCheckout(Order $Cart) : void
+    {
+        $sess_id = $Cart->getGatewayRef();
+        if (!empty($sess_id)) {
+            $this->getApiClient()->checkout->sessions->expire($sess_id);
+            $Cart->setGatewayRef('')->Save();
+        }
     }
 
 }
