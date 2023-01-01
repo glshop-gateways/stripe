@@ -20,6 +20,7 @@ use Shop\Customer;
 use Shop\Order;
 use Shop\Gateway as BaseGW;
 use Shop\Models\OrderStatus;
+use Shop\Models\CustomerGateway;
 use Shop\Log;
 
 
@@ -67,7 +68,7 @@ class Gateway extends \Shop\Gateway
      *
      * @param   array   $A      Array of fields from the DB
      */
-    public function __construct($A=array())
+    public function __construct(array $A=array())
     {
         // Set up the config field definitions.
         $this->cfgFields = array(
@@ -106,7 +107,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  object  $this
      */
-    public function loadSDK()
+    public function loadSDK() : self
     {
         require_once __DIR__ . '/vendor/autoload.php';
         return $this;
@@ -120,7 +121,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  object      SquareClient object
      */
-    public function getApiClient()
+    public function getApiClient() : object
     {
         static $_client = NULL;
         if ($_client === NULL) {
@@ -139,7 +140,7 @@ class Gateway extends \Shop\Gateway
      *  @param  object  $cart   Shopping cart
      *  @return string          HTML for input vars
      */
-    public function gatewayVars($cart)
+    public function gatewayVars(Order $cart) : string
     {
         global $LANG_SHOP;
 
@@ -224,7 +225,6 @@ class Gateway extends \Shop\Gateway
         // Create the checkout session
         $session_params = array(
             'mode' => 'payment',
-            'payment_method_types' => ['card'],
             'line_items' => $line_items,
             'success_url' => Config::get('url') . '/index.php?thanks=stripe',
             'cancel_url' => $cart->cancelUrl(),
@@ -235,7 +235,7 @@ class Gateway extends \Shop\Gateway
         );
 
         // Retrieve or create a Square customer record as needed
-        $gwCustomer = $this->getCustomer($cart->getUid());
+        $gwCustomer = $this->getCustomer($cart);
         if ($gwCustomer) {
             $session_params['customer'] = $gwCustomer->id;
         }
@@ -244,7 +244,7 @@ class Gateway extends \Shop\Gateway
         try {
             $this->session = $apiClient->checkout->sessions->create($session_params);
         } catch (\Exception $e) {
-            Log::write('shop_system', Log::ERROR, __METHOD__ . ': ' . $e->getMessage());
+            Log::error(__METHOD__ . ': ' . $e->getMessage());
         }
         if (!$have_js) {
             $outputHandle = \outputHandler::getInstance();
@@ -264,7 +264,7 @@ class Gateway extends \Shop\Gateway
      * @param   object  $cart   Shopping cart object
      * @return  string  Javascript commands.
      */
-    public function getCheckoutJS($cart)
+    public function getCheckoutJS(Order $cart) : string
     {
         $js = array(
             'finalizeCart("' . $cart->getOrderID() . '","' . $cart->getUID() . '", ' . $this->do_redirect . ');',
@@ -318,12 +318,13 @@ class Gateway extends \Shop\Gateway
      * @param   string  $pmt_id     Payment Intent ID
      * @return  object  Strip Payment Intent object
      */
-    public function getPayment($pmt_id)
+    public function getPayment(string $pmt_id) : ?object
     {
         if (empty($pmt_id)) {
-            return false;
+            return NULL;
         }
         $this->getApiClient();
+        $pmt = $this->getApiClient()->paymentIntents->retrieve($pmt_id);
         return \Stripe\PaymentIntent::retrieve($pmt_id);
     }
 
@@ -333,7 +334,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  string      Instruction text
      */
-    protected function getInstructions()
+    protected function getInstructions() : string
     {
         global $LANG_SHOP_HELP;
         return '<ul><li>' . $this->adminWarnBB() . '</li><li>' .
@@ -345,46 +346,75 @@ class Gateway extends \Shop\Gateway
      * Get the gateway's customer record by user ID.
      * Creates a customer if not already present.
      *
-     * @param   integer $uid    Customer user ID
+     * @param   object  $Cart   Shopping cart object
      * @return  object      Stripe customer record
      */
-    public function getCustomer(int $uid) : ?object
+    public function getCustomer(Cart $Cart) : ?object
     {
         $cust_info = NULL;
-        $Customer = Customer::getInstance($uid);
-        $gw_id = $Customer->getGatewayId($this->gw_name);
-        if ($gw_id) {
+        $email = $Cart->getBuyerEmail();
+
+        if ($Cart->getUid() > 1) {
+            $Customer = Customer::getInstance($Cart->getUid());
+        } else {
+            $Customer = new Customer;
+            $Customer->setEmail($email);
+        }
+        $cust_id = $this->getCustomerId($Customer);
+        $client = $this->getApiClient();
+        if (!$cust_id) {
+            // Don't have a customer ID saved, try searching Strip for one
+            // matching the email address.
             try {
-                $client = $this->getApiClient();
-                $cust_info = $client->customers->retrieve($gw_id);
+                $apiResponse = $client->customers->search(array('query' => "email:'$email'"));
+                if (
+                    is_object($apiResponse) &&
+                    isset($apiResponse->data) &&
+                    is_array($apiResponse->data) &&
+                    !empty($apiResponse->data)
+                ) {
+                    // Found one or more matching customer records at Stripe.
+                    $cust_info = $apiReaponse->data[0];
+                }
             } catch (\Exception $e) {
                 // Likely customer not found thrown. Leave $cust_info as NULL.
             }
+        } else {
+            // Get the customer information from the known customer ID.
+            $apiResponse = $client->customers->retrieve($cust_id);
+            if (
+                is_object($apiResponse) &&
+                isset($apiResponse->created) &&
+                !empty($apiResponse->created)
+            ) {
+                // found a customer record
+                $cust_info = $apiResponse;
+            }
         }
-        if (
-            !is_object($cust_info) ||
-            !isset($cust_info->id) ||
-            !isset($cust_info->created)
-        ) {
-            $cust_info = $this->createCustomer($Customer);
+
+        // If a customer isn't found at Stripe, create a new one.
+        if (!is_object($cust_info) || !isset($cust_info->id)) {
+            $cust_info = $this->createCustomer($Customer, $Cart->getBillto());
         }
         return $cust_info;
     }
 
 
     /**
-     * Create a new customer record with Stripe.
+     * Create a new customer record with Stripe and saves the ID locally.
      * Called if getCustomer() returns an empty set.
      *
      * @param   object  $Order      Order object, to get customer info
      * @return  object|false    Customer object, or false if an error occurs
      */
-    private function createCustomer($Customer) : ?object
+    private function createCustomer($Customer, ?object $Address=NULL) : ?object
     {
         // Get the default billing address to user in the Stripe record.
         // If there is no name entered for the default address, use the
         // glFusion full name.
-        $Address = $Customer->getDefaultAddress('billto');
+        if ($Customer->getUid() > 1) {
+            $Address = $Customer->getDefaultAddress('billto');
+        }
         $name = $Address->getName();
         if (empty($name)) {
             $name = $Customer->getFullname();
@@ -406,12 +436,21 @@ class Gateway extends \Shop\Gateway
         $client = $this->getApiClient();
         try {
             $apiResponse = $client->customers->create($params);
-            if (isset($apiResponse->id)) {
+            /*if (isset($apiResponse->id)) {
                 $Customer->setGatewayId($this->gw_name, $apiResponse->id);
-            }
+            }*/
         } catch (\Exception $e) {
-            Log:;write('shop_system', Log::ERROR, __METHOD__ . ': ' . $e->getMessage());
+            Log::error(__METHOD__ . ': ' . $e->getMessage());
             $apiResponse = NULL;
+        }
+        if ($apiResponse) {
+            $params = new CustomerGateway(array(
+                'email' => $apiResponse->email,
+                'cust_id' => $apiResponse->id,
+                'gw_id' => $this->gw_name,
+                'uid' => $Customer->getUid(),
+            ) );
+            $this->saveCustomerInfo($params);
         }
         return $apiResponse;
     }
@@ -432,7 +471,7 @@ class Gateway extends \Shop\Gateway
         if ($gwCustomer) {
             $cust_id = $gwCustomer->id;
         } else {
-            Log::write('shop_system', Log::ERROR, "Error creating Stripe customer for order {$Order->getOrderId()}");
+            Log::error("Error creating Stripe customer for order {$Order->getOrderId()}");
             return false;
         }
 
@@ -504,7 +543,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  boolean     True if valid, False if not
      */
-    public function hasValidConfig()
+    public function hasValidConfig() : bool
     {
         return !empty($this->getConfig('pub_key')) &&
             !empty($this->getConfig('sec_key')) &&
