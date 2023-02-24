@@ -1,11 +1,11 @@
 <?php
 /**
- * This file contains the Stripe IPN class.
+ * This file contains the Stripe Webhook class.
  *
  * @author      Lee Garner <lee@leegarner.com>
- * @copyright   Copyright (c) 2019-2020 Lee Garner
+ * @copyright   Copyright (c) 2019-2023 Lee Garner
  * @package     shop
- * @version     v1.3.0
+ * @version     v1.5.0
  * @since       v0.7.1
  * @license     http://opensource.org/licenses/gpl-2.0.php
  *              GNU Public License v2 or later
@@ -266,6 +266,12 @@ class Webhook extends \Shop\Webhook
                 $LogID = $this->logIPN();
 
                 $this_pmt = Currency::getInstance($currency)->fromInt($amt_paid);
+                $this->setIPN('pmt_gross', $this_pmt);
+                if (isset($this->getData()->data->object->customer_details)) {
+                    $tmp = $this->getData()->data->object->customer_details;
+                    $this->setIPN('payer_name', $tmp->name);
+                    $this->setIPN('payer_email', $tmp->email);
+                }
                 $this->Payment = Payment::getByReference($this->getID());
                 if ($this->Payment->getPmtID() == 0) {
                     $this->Payment->setRefID($Payment->payment_intent)
@@ -284,19 +290,20 @@ class Webhook extends \Shop\Webhook
             break;
         case 'charge.refunded':
             $object = $this->getData()->data->object;
-            if (isset($object->payment_intent)) {
-                $pmt_intent = $object->payment_intent;
+            if (isset($object->refunds->data) && is_array($object->refunds->data)) {
+                $refund = $object->refunds->data[0];
+                $ref_id = $refund->id;
+                $pmt_intent = $refund->payment_intent;
             } else {
-                $pmt_intent = '';
+                $ref_id = '';
             }
-            if (empty($pmt_intent)) {
-                Log::debug('No payment intent included in webhook');
+            if (empty($ref_id)) {
+                Log::debug('No refund ID included in webhook');
                 return false;
             }
-
-            $refund_amt = $object->amount_refunded / 100;
+            $refund_amt = $refund->amount / 100;
             $this->setPayment($refund_amt * -1);
-            $this->setRefId($pmt_intent);
+            $this->setRefId($ref_id);
             $this->setPmtMethod('refund');
             $this->setComplete($object->status == 'succeeded');
 

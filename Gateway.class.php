@@ -3,9 +3,9 @@
  * Stripe payment gateway class.
  *
  * @author      Lee Garner <lee@leegarner.com>
- * @copyright   Copyright (c) 2019-2022 Lee Garner <lee@leegarner.com>
+ * @copyright   Copyright (c) 2019-2023 Lee Garner <lee@leegarner.com>
  * @package     shop
- * @version     v1.4.1
+ * @version     v1.5.0
  * @since       v0.7.1
  * @license     http://opensource.org/licenses/gpl-2.0.php
  *              GNU Public License v2 or later
