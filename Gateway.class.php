@@ -104,18 +104,6 @@ class Gateway extends \Shop\Gateway
 
 
     /**
-     * Make the API classes available. May be needed for reports.
-     *
-     * @return  object  $this
-     */
-    public function loadSDK() : self
-    {
-        require_once __DIR__ . '/vendor/autoload.php';
-        return $this;
-    }
-
-
-    /**
      * Get the Square API client object.
      * Initializes the API for use with static functions as well as
      * returning a client object.
@@ -287,7 +275,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  string      Configured webhook secret value
      */
-    public function getWebhookSecret()
+    public function getWebhookSecret() : string
     {
         return $this->hook_sec;
     }
@@ -299,7 +287,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  string      Public API key in use.
      */
-    public function getAPIKey()
+    public function getAPIKey() : string
     {
         return $this->pub_key;
     }
@@ -311,7 +299,7 @@ class Gateway extends \Shop\Gateway
      *
      * @return  string      Secret API key
      */
-    public function getSecretKey()
+    public function getSecretKey() : string
     {
         return $this->sec_key;
     }
@@ -596,9 +584,9 @@ class Gateway extends \Shop\Gateway
      * List all available checkout sessions.
      * Used for debugging only.
      *
-     * @return  object      Session info from Stripe
+     * @return  array   Array with checkout sessions in the `data` property
      */
-    public function listCheckoutSessions()
+    public function listCheckoutSessions() : array
     {
         return $this->getApiClient()->checkout->sessions->all();
     }
